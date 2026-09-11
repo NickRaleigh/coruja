@@ -216,12 +216,14 @@ class PanelController extends AbstractController
 
         $keyphrase = (string) (Dot::get($raw, 'seo.focus_keyphrase') ?? '');
         $livePage = new Page($page->path, $raw, $page->file);
+        $previewFailed = false;
 
         try {
             $context = $livePage->context();
             $context['nav'] = $this->site->navFor($livePage);
             $html = $this->renderView('main/'.$livePage->template().'.html.twig', $context);
         } catch (\Throwable $e) {
+            $previewFailed = true;
             $html = sprintf(
                 '<html><head><title>%s</title><meta name="description" content="%s"><meta name="robots" content="%s"></head><body>%s</body></html>',
                 htmlspecialchars((string) ($raw['title'] ?? '')),
@@ -231,12 +233,16 @@ class PanelController extends AbstractController
             );
         }
 
-        return new JsonResponse($this->seo->analyze(
+        $result = $this->seo->analyze(
             $html,
             $keyphrase,
             $livePage->url(),
             (string) $this->getParameter('app.site_url'),
-        ));
+        );
+        $result['preview'] = $html;
+        $result['previewFailed'] = $previewFailed;
+
+        return new JsonResponse($result);
     }
 
     /** Best-effort plain text from a document when the template cannot render. */

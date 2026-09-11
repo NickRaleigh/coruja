@@ -121,6 +121,56 @@
         .sync-card__actions button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
         .sync-card__actions button:disabled { opacity: .4; cursor: default; }
 
+        /* live-editing drawer + preview */
+        /* height, not min-height: the flex chain below (main -> editview ->
+           preview -> iframe) needs a genuinely *definite* height to divide up.
+           A min-height floor leaves body's own height "auto", so it never
+           resolves — the iframe fell back to sizing off its own 100vh
+           content, which fed back into itself and ran away to ~12,000px. */
+        body.edit-page { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        body.edit-page header.bar { flex: 0 0 auto; }
+        body.edit-page main { flex: 1 1 auto; min-height: 0; max-width: none; margin: 0; padding: 0; display: flex; }
+
+        .editview { display: flex; flex-direction: row; flex: 1 1 auto; min-height: 0; overflow: hidden; background: #fff; }
+        .editview__preview { flex: 1 1 auto; min-width: 0; position: relative; }
+        .editview__preview:not(.is-open) { display: none; }
+        /* Preview hidden: let the drawer claim the full width instead of
+           staying pinned to its usual 480px with nothing beside it. */
+        .editview.no-preview .editview__drawer {
+            flex: 1 1 auto; width: auto; max-width: none; border-right: 0;
+        }
+        .editview__frame {
+            /* position:absolute + inset, not width/height:100%: a percentage
+               height on a plain block child needs the ancestor's height to be
+               "definite", which doesn't reliably propagate through nested
+               flex containers — the iframe fell back to sizing off its own
+               100vh content instead, a runaway feedback loop. inset:0 against
+               the nearest positioned ancestor has no such ambiguity. */
+            position: absolute; inset: 0; width: 100%; height: 100%;
+            border: 0; display: block; background: #fff;
+        }
+
+        /* A real flex sidebar, not an overlay: animating width (not transform)
+           means the preview pane actually reflows into the freed space. */
+        .editview__drawer {
+            flex: 0 0 auto; width: 480px; max-width: 88vw; height: 100%;
+            background: var(--panel); border-right: 1px solid var(--line);
+            overflow-y: auto; overflow-x: hidden;
+            padding: 1.4rem 1.4rem 3rem;
+            transition: width .25s ease, padding .25s ease, border-color .25s ease;
+        }
+        .editview__drawer:not(.is-open) {
+            width: 0; padding-left: 0; padding-right: 0; border-right-color: transparent;
+        }
+
+        .drawer-toggle {
+            border: 1px solid var(--line); background: #fff; border-radius: 6px;
+            padding: .4rem .9rem; cursor: pointer; font: inherit; font-size: .85rem; color: var(--ink);
+        }
+        .drawer-toggle:hover { background: #f5f2ea; }
+        .drawer-toggle.is-active { background: var(--accent); color: #fff; border-color: var(--accent); }
+        .drawer-toggle.is-active:hover { background: var(--accent); opacity: .9; }
+
         /* media library */
         body.media-page main { max-width: 1240px; }
         .crumbs { font-size: .85rem; color: var(--dim); margin-bottom: 1rem; }
@@ -285,6 +335,7 @@
 <body class="{% block body_class %}{% endblock %}">
 <header class="bar">
     <a class="home" href="{{ path('panel_dashboard') }}">{{ site.get('siteName')|default('Site') }} · Panel</a>
+    {% block header_extra %}{% endblock %}
     <nav>
         <a href="{{ path('panel_dashboard') }}">Pages</a>
         <a href="{{ path('panel_settings') }}">Site settings</a>
@@ -393,9 +444,57 @@
         });
     }
 
-    // Live SEO / readability analysis.
+    // Live-editing drawer + preview: independent show/hide toggles, each
+    // remembered per tab. Editor and preview can each be off, so you can
+    // e.g. edit content full-width with no live render, or vice versa.
+    (function () {
+        var editview = document.querySelector('[data-editview]');
+        if (!editview) return;
+
+        function wireToggle(panelSel, toggleSel, storageKey, onChange) {
+            var panel = document.querySelector(panelSel);
+            var toggle = document.querySelector(toggleSel);
+            if (!panel || !toggle) return;
+            toggle.classList.toggle('is-active', panel.classList.contains('is-open'));
+            try {
+                var remembered = sessionStorage.getItem(storageKey);
+                if (remembered !== null) {
+                    var isOpen = remembered === '1';
+                    panel.classList.toggle('is-open', isOpen);
+                    toggle.classList.toggle('is-active', isOpen);
+                    if (onChange) onChange(isOpen);
+                }
+            } catch (e) {}
+            toggle.addEventListener('click', function () {
+                var open = panel.classList.toggle('is-open');
+                toggle.classList.toggle('is-active', open);
+                try { sessionStorage.setItem(storageKey, open ? '1' : '0'); } catch (e) {}
+                if (onChange) onChange(open);
+            });
+        }
+
+        wireToggle('[data-drawer]', '[data-drawer-toggle]', 'coruja:drawerOpen');
+        wireToggle('[data-preview]', '[data-preview-toggle]', 'coruja:previewOpen', function (open) {
+            editview.classList.toggle('no-preview', !open);
+        });
+    })();
+
+    // Live SEO / readability analysis — also drives the live preview iframe,
+    // both fed by the same panel_analyze render of the unsaved form state.
     var seoPanel = document.querySelector('[data-seo-panel]');
     var editor = document.querySelector('form.editor');
+    var previewFrame = document.querySelector('[data-preview-frame]');
+
+    function updatePreview(html) {
+        if (!previewFrame || null == html) return;
+        var scrollY = 0;
+        try { scrollY = previewFrame.contentWindow.scrollY || 0; } catch (e) {}
+        previewFrame.onload = function () {
+            try { previewFrame.contentWindow.scrollTo(0, scrollY); } catch (e) {}
+        };
+        previewFrame.srcdoc = html;
+    }
+
     if (seoPanel && editor) {
         var seoTimer;
         var esc = function (s) { var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; };
@@ -403,6 +502,7 @@
         var pq = function (sel) { return seoPanel.querySelector(sel); };
 
         function seoRender(d) {
+            updatePreview(d.preview);
             pq('[data-serp-url]').textContent = d.snippet.url;
             var t = pq('[data-serp-title]');
             t.textContent = d.snippet.title || 'Untitled page';
