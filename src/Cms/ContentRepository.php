@@ -312,6 +312,52 @@ final class ContentRepository
         return $max + 1;
     }
 
+    /**
+     * Replace every exact occurrence of $from with $to across all pages'
+     * field values — e.g. re-pointing an image field after a media move.
+     * Saves any page that changed and reports how many were touched.
+     *
+     * Matches whole values only (an image field's value is the bare path,
+     * same as this), not substrings inside richtext/HTML.
+     */
+    public function updateReferences(string $from, string $to): int
+    {
+        if ('' === $from || $from === $to) {
+            return 0;
+        }
+
+        $updated = 0;
+        foreach ($this->all() as $page) {
+            $changed = false;
+            $raw = $this->replaceValue($page->raw, $from, $to, $changed);
+            if ($changed) {
+                $this->save($page, $raw);
+                ++$updated;
+            }
+        }
+
+        return $updated;
+    }
+
+    /**
+     * @param array<string, mixed> $raw
+     *
+     * @return array<string, mixed>
+     */
+    private function replaceValue(array $raw, string $from, string $to, bool &$changed): array
+    {
+        foreach ($raw as $key => $value) {
+            if (\is_array($value)) {
+                $raw[$key] = $this->replaceValue($value, $from, $to, $changed);
+            } elseif (\is_string($value) && $value === $from) {
+                $raw[$key] = $to;
+                $changed = true;
+            }
+        }
+
+        return $raw;
+    }
+
     /** Guards against traversal and stray path characters. */
     private function isSafePath(string $path): bool
     {

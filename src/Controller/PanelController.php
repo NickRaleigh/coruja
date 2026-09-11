@@ -56,7 +56,6 @@ class PanelController extends AbstractController
     {
         return $this->render('@Coruja/panel/dashboard.html.twig', [
             'tree' => $this->content->tree(),
-            'site' => $this->site->all(),
             'newTemplates' => $this->blueprints->creatable(),
             'sync' => $this->git->status(),
         ]);
@@ -257,50 +256,186 @@ class PanelController extends AbstractController
     public function mediaIndex(Request $request): Response
     {
         if ('json' === $request->query->get('format')) {
-            return new JsonResponse(['files' => $this->media->all()]);
+            return new JsonResponse(['files' => $this->media->allRecursive()]);
         }
 
-        return $this->render('@Coruja/panel/media.html.twig', ['files' => $this->media->all()]);
+        $folder = trim((string) $request->query->get('folder', ''), '/');
+        $type = $request->query->get('type');
+        $type = \in_array($type, ['image', 'video'], true) ? $type : null;
+
+        $crumbs = [];
+        if ('' !== $folder) {
+            $parts = explode('/', $folder);
+            $acc = [];
+            foreach ($parts as $part) {
+                $acc[] = $part;
+                $crumbs[] = ['name' => $part, 'path' => implode('/', $acc)];
+            }
+        }
+
+        return $this->render('@Coruja/panel/media.html.twig', [
+            'folder' => $folder,
+            'type' => $type,
+            'crumbs' => $crumbs,
+            'folders' => $this->media->folders($folder),
+            'files' => $this->media->all($folder, $type),
+            'allFolders' => $this->media->allFolders(),
+        ]);
     }
 
     #[Route('/media', name: 'panel_media_upload', methods: ['POST'])]
     public function mediaUpload(Request $request): Response
     {
+        $folder = trim((string) $request->request->get('folder', ''), '/');
+
         if (!$this->isCsrfTokenValid('panel', (string) $request->request->get('_token'))) {
             $this->addFlash('error', 'Session expired — try again.');
 
-            return $this->redirectToRoute('panel_media');
+            return $this->redirectToRoute('panel_media', ['folder' => $folder]);
         }
 
         $file = $request->files->get('file');
         if (null === $file) {
             $this->addFlash('error', 'Choose a file first.');
 
-            return $this->redirectToRoute('panel_media');
+            return $this->redirectToRoute('panel_media', ['folder' => $folder]);
         }
 
         try {
-            $ref = $this->media->store($file);
+            $ref = $this->media->store($file, $folder);
             $this->track('added media '.$ref);
             $this->addFlash('success', 'Uploaded '.$ref);
         } catch (\InvalidArgumentException|\RuntimeException $e) {
             $this->addFlash('error', $e->getMessage());
         }
 
-        return $this->redirectToRoute('panel_media');
+        return $this->redirectToRoute('panel_media', ['folder' => $folder]);
     }
 
     #[Route('/media/delete', name: 'panel_media_delete', methods: ['POST'])]
     public function mediaDelete(Request $request): Response
     {
+        $ref = (string) $request->request->get('ref');
+        $folder = \dirname($ref);
+        $folder = '.' === $folder ? '' : $folder;
+
         if ($this->isCsrfTokenValid('panel', (string) $request->request->get('_token'))) {
-            $name = (string) $request->request->get('name');
-            $this->media->delete($name);
-            $this->track('removed media '.$name);
+            $this->media->delete($ref);
+            $this->track('removed media '.$ref);
             $this->addFlash('success', 'Deleted.');
         }
 
-        return $this->redirectToRoute('panel_media');
+        return $this->redirectToRoute('panel_media', ['folder' => $folder]);
+    }
+
+    #[Route('/media/move', name: 'panel_media_move', methods: ['POST'])]
+    public function mediaMove(Request $request): Response
+    {
+        $ref = (string) $request->request->get('ref');
+        $from = \dirname($ref);
+        $from = '.' === $from ? '' : $from;
+        $to = trim((string) $request->request->get('to', ''), '/');
+
+        if ($this->isCsrfTokenValid('panel', (string) $request->request->get('_token'))) {
+            try {
+                $newRef = $this->media->move($ref, $to);
+                $pages = $this->content->updateReferences('uploads/'.$ref, 'uploads/'.$newRef);
+                $this->track('moved media '.$ref.' -> '.$newRef.($pages ? ' ('.$pages.' page(s) updated)' : ''));
+                $this->addFlash('success', 'Moved.'.($pages ? ' Updated '.$pages.' page'.(1 === $pages ? '' : 's').' that referenced it.' : ''));
+            } catch (\InvalidArgumentException|\RuntimeException $e) {
+                $this->addFlash('error', $e->getMessage());
+
+                return $this->redirectToRoute('panel_media', ['folder' => $from]);
+            }
+        }
+
+        return $this->redirectToRoute('panel_media', ['folder' => $to]);
+    }
+
+    #[Route('/media/bulk-move', name: 'panel_media_bulk_move', methods: ['POST'])]
+    public function mediaBulkMove(Request $request): Response
+    {
+        $folder = trim((string) $request->request->get('folder', ''), '/');
+        $to = trim((string) $request->request->get('to', ''), '/');
+        $refs = array_values(array_filter((array) $request->request->all('refs')));
+
+        if ($this->isCsrfTokenValid('panel', (string) $request->request->get('_token')) && $refs) {
+            $result = $this->media->moveMany($refs, $to);
+
+            $pagesTouched = 0;
+            foreach ($result['renamed'] as $oldRef => $newRef) {
+                $pagesTouched += $this->content->updateReferences('uploads/'.$oldRef, 'uploads/'.$newRef);
+            }
+
+            $this->track('bulk-moved '.$result['moved'].' file(s) to '.('' === $to ? 'All media' : $to).($pagesTouched ? ' ('.$pagesTouched.' page ref(s) updated)' : ''));
+            if ($result['failed']) {
+                $this->addFlash('error', \count($result['failed']).' file(s) could not be moved.');
+            }
+            if ($result['moved']) {
+                $this->addFlash('success', 'Moved '.$result['moved'].' file(s).'.($pagesTouched ? ' Updated '.$pagesTouched.' page reference(s).' : ''));
+            }
+
+            return $this->redirectToRoute('panel_media', ['folder' => $to]);
+        }
+
+        return $this->redirectToRoute('panel_media', ['folder' => $folder]);
+    }
+
+    #[Route('/media/bulk-delete', name: 'panel_media_bulk_delete', methods: ['POST'])]
+    public function mediaBulkDelete(Request $request): Response
+    {
+        $folder = trim((string) $request->request->get('folder', ''), '/');
+        $refs = array_values(array_filter((array) $request->request->all('refs')));
+
+        if ($this->isCsrfTokenValid('panel', (string) $request->request->get('_token')) && $refs) {
+            $count = $this->media->deleteMany($refs);
+            $this->track('bulk-deleted '.$count.' file(s)');
+            $this->addFlash('success', 'Deleted '.$count.' file(s).');
+        }
+
+        return $this->redirectToRoute('panel_media', ['folder' => $folder]);
+    }
+
+    #[Route('/media/folders', name: 'panel_media_folder_create', methods: ['POST'])]
+    public function mediaFolderCreate(Request $request): Response
+    {
+        $parent = trim((string) $request->request->get('parent', ''), '/');
+
+        if ($this->isCsrfTokenValid('panel', (string) $request->request->get('_token'))) {
+            $name = (string) $request->request->get('name');
+            try {
+                $path = $this->media->createFolder($parent, $name);
+                $this->track('created media folder '.$path);
+
+                return $this->redirectToRoute('panel_media', ['folder' => $path]);
+            } catch (\InvalidArgumentException|\RuntimeException $e) {
+                $this->addFlash('error', $e->getMessage());
+            }
+        }
+
+        return $this->redirectToRoute('panel_media', ['folder' => $parent]);
+    }
+
+    #[Route('/media/folders/delete', name: 'panel_media_folder_delete', methods: ['POST'])]
+    public function mediaFolderDelete(Request $request): Response
+    {
+        $path = trim((string) $request->request->get('path', ''), '/');
+        $parent = \dirname($path);
+        $parent = '.' === $parent ? '' : $parent;
+
+        if ($this->isCsrfTokenValid('panel', (string) $request->request->get('_token'))) {
+            try {
+                $this->media->deleteFolder($path);
+                $this->track('removed media folder '.$path);
+                $this->addFlash('success', 'Folder deleted.');
+            } catch (\InvalidArgumentException $e) {
+                $this->addFlash('error', $e->getMessage());
+
+                return $this->redirectToRoute('panel_media', ['folder' => $path]);
+            }
+        }
+
+        return $this->redirectToRoute('panel_media', ['folder' => $parent]);
     }
 
     #[Route('/settings', name: 'panel_settings', methods: ['GET', 'POST'])]

@@ -1,46 +1,333 @@
 {% extends '@Coruja/panel/base.html.twig' %}
 {% block title %}Media{% endblock %}
+{% block body_class %}media-page{% endblock %}
 
 {% block body %}
     <h1>Media library</h1>
 
-    <form class="editor" method="post" action="{{ path('panel_media_upload') }}" enctype="multipart/form-data">
-        <input type="hidden" name="_token" value="{{ csrf_token('panel') }}">
-        <div class="field">
-            <label class="lbl" for="mfile">Upload an image</label>
-            <p class="help">JPEG, PNG, GIF, WebP, AVIF or SVG. Up to 8 MB.</p>
-            <input type="file" id="mfile" name="file" accept="image/*" required>
-        </div>
-        <button type="submit" class="save">Upload</button>
-    </form>
-
-    <h2>{{ files|length }} file{{ files|length == 1 ? '' : 's' }}</h2>
-    <div class="media-grid">
-        {% for f in files %}
-            <figure class="media-item">
-                <img src="{{ asset(f.path) }}" alt="{{ f.name }}" loading="lazy">
-                <figcaption class="mono">{{ f.path }}</figcaption>
-                <div class="media-actions">
-                    <button type="button" class="copy" data-copy="{{ f.path }}">Copy path</button>
-                    <form method="post" action="{{ path('panel_media_delete') }}" onsubmit="return confirm('Delete {{ f.name }}?')">
-                        <input type="hidden" name="_token" value="{{ csrf_token('panel') }}">
-                        <input type="hidden" name="name" value="{{ f.name }}">
-                        <button type="submit" class="danger">Delete</button>
-                    </form>
-                </div>
-            </figure>
-        {% else %}
-            <p class="help">Nothing uploaded yet.</p>
+    <nav class="crumbs">
+        <a href="{{ path('panel_media', {type: type}) }}"{% if not folder %} class="here"{% endif %}>All media</a>
+        {% for c in crumbs %}
+            <span class="sep">/</span>
+            <a href="{{ path('panel_media', {folder: c.path, type: type}) }}"{% if c.path == folder %} class="here"{% endif %}>{{ c.name }}</a>
         {% endfor %}
+    </nav>
+
+    <div class="media-toolbar">
+        <div class="typefilter">
+            <a href="{{ path('panel_media', {folder: folder}) }}"{% if not type %} class="here"{% endif %}>All</a>
+            <a href="{{ path('panel_media', {folder: folder, type: 'image'}) }}"{% if type == 'image' %} class="here"{% endif %}>Photos</a>
+            <a href="{{ path('panel_media', {folder: folder, type: 'video'}) }}"{% if type == 'video' %} class="here"{% endif %}>Videos</a>
+        </div>
+
+        <form class="newfolder" method="post" action="{{ path('panel_media_folder_create') }}">
+            <input type="hidden" name="_token" value="{{ csrf_token('panel') }}">
+            <input type="hidden" name="parent" value="{{ folder }}">
+            <input type="text" name="name" placeholder="New folder name" required>
+            <button type="submit" class="add">+ Folder</button>
+        </form>
+
+        <button type="button" class="add" id="selectToggle">Select</button>
+
+        <form class="upload" method="post" action="{{ path('panel_media_upload') }}" enctype="multipart/form-data">
+            <input type="hidden" name="_token" value="{{ csrf_token('panel') }}">
+            <input type="hidden" name="folder" value="{{ folder }}">
+            <label class="filepick">
+                Upload
+                <input type="file" name="file" accept="image/*,video/*" required multiple hidden>
+            </label>
+        </form>
+    </div>
+    <p class="help">Images up to 8 MB, video up to 2 GB. Drop files anywhere on this page to upload them into “{{ folder ?: 'All media' }}”. Drag a tile onto a folder to move it there.</p>
+
+    <div class="gallery" data-dropzone data-upload-url="{{ path('panel_media_upload') }}" data-token="{{ csrf_token('panel') }}" data-folder="{{ folder }}">
+        {% for f in folders %}
+            <a class="folder-tile" href="{{ path('panel_media', {folder: f.path, type: type}) }}" data-drop-folder="{{ f.path }}">
+                <span class="folder-icon">📁</span>
+                <span class="folder-name">{{ f.name }}</span>
+                <span class="folder-count">{{ f.count }} file{{ f.count == 1 ? '' : 's' }}</span>
+            </a>
+        {% endfor %}
+
+        {% for f in files %}
+            <div class="media-tile" data-media-item data-ref="{{ f.ref }}" draggable="true">
+                <label class="media-tile__check">
+                    <input type="checkbox" class="tile-select" value="{{ f.ref }}">
+                </label>
+                <button type="button" class="media-tile__open" data-lightbox
+                    data-src="{{ asset(f.path) }}" data-name="{{ f.name }}" data-path="{{ f.path }}"
+                    data-ref="{{ f.ref }}" data-type="{{ f.type }}" data-size="{{ f.size }}" data-modified="{{ f.modified }}">
+                    {% if f.type == 'video' %}
+                        <video src="{{ asset(f.path) }}" muted preload="metadata"></video>
+                        <span class="media-tile__badge">▶ video</span>
+                    {% else %}
+                        <img src="{{ asset(f.path) }}" alt="{{ f.name }}" loading="lazy">
+                    {% endif %}
+                    <span class="media-tile__name">{{ f.name }}</span>
+                </button>
+            </div>
+        {% endfor %}
+
+        {% if not folders and not files %}
+            <p class="help">Nothing here yet. Upload some files or drop them onto this page.</p>
+        {% endif %}
     </div>
 
+    <div class="bulkbar" id="bulkBar" hidden>
+        <span id="bulkCount">0 selected</span>
+        <select id="bulkMoveTo">
+            <option value="">All media (root)</option>
+            {% for fp in allFolders %}
+                <option value="{{ fp }}">{{ fp }}</option>
+            {% endfor %}
+        </select>
+        <button type="button" class="save" id="bulkMoveBtn">Move</button>
+        <button type="button" class="danger" id="bulkDeleteBtn">Delete</button>
+        <button type="button" class="add" id="bulkClearBtn">Clear</button>
+    </div>
+    <form method="post" action="{{ path('panel_media_bulk_move') }}" id="bulkMoveForm" hidden>
+        <input type="hidden" name="_token" value="{{ csrf_token('panel') }}">
+        <input type="hidden" name="folder" value="{{ folder }}">
+        <input type="hidden" name="to" id="bulkMoveFormTo" value="">
+    </form>
+    <form method="post" action="{{ path('panel_media_bulk_delete') }}" id="bulkDeleteForm" hidden>
+        <input type="hidden" name="_token" value="{{ csrf_token('panel') }}">
+        <input type="hidden" name="folder" value="{{ folder }}">
+    </form>
+
+    <dialog class="lightbox" id="mediaLightbox">
+        <button type="button" class="lightbox__close" data-close>&times;</button>
+        <div class="lightbox__frame">
+            <img id="lbImg" src="" alt="">
+            <video id="lbVideo" controls hidden></video>
+        </div>
+        <div class="lightbox__meta">
+            <div class="lightbox__name mono" id="lbName"></div>
+            <div class="lightbox__stats" id="lbStats"></div>
+            <div class="lightbox__row">
+                <button type="button" class="copy" id="lbCopy">Copy path</button>
+                <a class="view" id="lbOpen" href="" target="_blank" rel="noopener">Open full size ↗</a>
+            </div>
+            <form class="lightbox__move" method="post" action="{{ path('panel_media_move') }}">
+                <input type="hidden" name="_token" value="{{ csrf_token('panel') }}">
+                <input type="hidden" name="ref" id="lbMoveRef" value="">
+                <label for="lbMoveTo">Move to</label>
+                <select name="to" id="lbMoveTo">
+                    <option value="">All media (root)</option>
+                    {% for fp in allFolders %}
+                        <option value="{{ fp }}">{{ fp }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="save">Move</button>
+            </form>
+            <form class="lightbox__delete" method="post" action="{{ path('panel_media_delete') }}" id="lbDeleteForm">
+                <input type="hidden" name="_token" value="{{ csrf_token('panel') }}">
+                <input type="hidden" name="ref" id="lbDeleteRef" value="">
+                <button type="submit" class="danger">Delete</button>
+            </form>
+        </div>
+    </dialog>
+
+    {% if folder %}
+        <form method="post" action="{{ path('panel_media_folder_delete') }}" class="deletefolder"
+            onsubmit="return confirm('Delete the empty folder “{{ folder }}”?')">
+            <input type="hidden" name="_token" value="{{ csrf_token('panel') }}">
+            <input type="hidden" name="path" value="{{ folder }}">
+            <button type="submit" class="danger">Delete this folder</button>
+        </form>
+    {% endif %}
+
     <script>
-        document.addEventListener('click', function (e) {
-            var b = e.target.closest('.copy');
-            if (!b) return;
-            navigator.clipboard && navigator.clipboard.writeText(b.dataset.copy);
-            b.textContent = 'Copied';
-            setTimeout(function () { b.textContent = 'Copy path'; }, 1200);
+    (function () {
+        function fmtSize(bytes) {
+            if (bytes > 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+            return Math.round(bytes / 1024) + ' KB';
+        }
+        function fmtDate(ts) {
+            return new Date(ts * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+        }
+
+        // Nudge each video tile to paint a frame as its thumbnail (metadata alone won't).
+        document.querySelectorAll('.media-tile__open video').forEach(function (v) {
+            v.addEventListener('loadedmetadata', function () { v.currentTime = Math.min(1, v.duration / 2); }, { once: true });
         });
+
+        // Auto-submit the hidden multi-file input.
+        document.addEventListener('change', function (e) {
+            if (e.target.matches('.upload input[type=file]')) e.target.closest('form').submit();
+        });
+
+        // ---- Select mode + bulk actions ----
+        var gallery = document.querySelector('.gallery');
+        var selectToggle = document.getElementById('selectToggle');
+        var bulkBar = document.getElementById('bulkBar');
+        var bulkCount = document.getElementById('bulkCount');
+        var selectMode = false;
+
+        function selectedRefs() {
+            return Array.prototype.slice.call(gallery.querySelectorAll('.tile-select:checked')).map(function (c) { return c.value; });
+        }
+        function refreshBulkBar() {
+            var refs = selectedRefs();
+            bulkCount.textContent = refs.length + ' selected';
+            bulkBar.hidden = refs.length === 0;
+        }
+        selectToggle.addEventListener('click', function () {
+            selectMode = !selectMode;
+            gallery.classList.toggle('select-mode', selectMode);
+            selectToggle.textContent = selectMode ? 'Done selecting' : 'Select';
+            if (!selectMode) {
+                gallery.querySelectorAll('.tile-select:checked').forEach(function (c) { c.checked = false; });
+                refreshBulkBar();
+            }
+        });
+        gallery.addEventListener('change', function (e) {
+            if (e.target.matches('.tile-select')) refreshBulkBar();
+        });
+        document.getElementById('bulkClearBtn').addEventListener('click', function () {
+            gallery.querySelectorAll('.tile-select:checked').forEach(function (c) { c.checked = false; });
+            refreshBulkBar();
+        });
+        document.getElementById('bulkMoveBtn').addEventListener('click', function () {
+            var refs = selectedRefs();
+            if (!refs.length) return;
+            var form = document.getElementById('bulkMoveForm');
+            document.getElementById('bulkMoveFormTo').value = document.getElementById('bulkMoveTo').value;
+            refs.forEach(function (ref) {
+                var input = document.createElement('input');
+                input.type = 'hidden'; input.name = 'refs[]'; input.value = ref;
+                form.appendChild(input);
+            });
+            form.hidden = false;
+            form.submit();
+        });
+        document.getElementById('bulkDeleteBtn').addEventListener('click', function () {
+            var refs = selectedRefs();
+            if (!refs.length) return;
+            if (!confirm('Delete ' + refs.length + ' file(s)? This can\'t be undone.')) return;
+            var form = document.getElementById('bulkDeleteForm');
+            refs.forEach(function (ref) {
+                var input = document.createElement('input');
+                input.type = 'hidden'; input.name = 'refs[]'; input.value = ref;
+                form.appendChild(input);
+            });
+            form.hidden = false;
+            form.submit();
+        });
+
+        // In select mode, clicking a tile toggles its checkbox instead of opening the lightbox.
+        gallery.addEventListener('click', function (e) {
+            if (!selectMode) return;
+            var open = e.target.closest('.media-tile__open');
+            if (!open) return;
+            e.preventDefault();
+            e.stopPropagation();
+            var cb = open.closest('[data-media-item]').querySelector('.tile-select');
+            cb.checked = !cb.checked;
+            refreshBulkBar();
+        }, true);
+
+        // ---- Lightbox ----
+        var dlg = document.getElementById('mediaLightbox');
+        var img = document.getElementById('lbImg');
+        var video = document.getElementById('lbVideo');
+        var nameEl = document.getElementById('lbName');
+        var statsEl = document.getElementById('lbStats');
+        var copyBtn = document.getElementById('lbCopy');
+        var openLink = document.getElementById('lbOpen');
+        var moveRef = document.getElementById('lbMoveRef');
+        var moveTo = document.getElementById('lbMoveTo');
+        var deleteRef = document.getElementById('lbDeleteRef');
+        var currentPath = '';
+
+        document.addEventListener('click', function (e) {
+            if (selectMode) return;
+            var tile = e.target.closest('[data-lightbox]');
+            if (!tile) return;
+            var isVideo = tile.dataset.type === 'video';
+            img.hidden = isVideo;
+            video.hidden = !isVideo;
+            if (isVideo) {
+                video.src = tile.dataset.src;
+                img.src = '';
+            } else {
+                img.src = tile.dataset.src;
+                video.src = '';
+            }
+            nameEl.textContent = tile.dataset.name;
+            statsEl.textContent = fmtSize(+tile.dataset.size) + ' · uploaded ' + fmtDate(+tile.dataset.modified);
+            openLink.href = tile.dataset.src;
+            currentPath = tile.dataset.path;
+            moveRef.value = tile.dataset.ref;
+            deleteRef.value = tile.dataset.ref;
+            var folderOfRef = tile.dataset.ref.includes('/') ? tile.dataset.ref.split('/').slice(0, -1).join('/') : '';
+            moveTo.value = folderOfRef;
+            dlg.showModal();
+        });
+        dlg.querySelector('[data-close]').addEventListener('click', function () { dlg.close(); });
+        dlg.addEventListener('click', function (e) { if (e.target === dlg) dlg.close(); });
+        dlg.addEventListener('close', function () { video.pause(); video.src = ''; });
+        copyBtn.addEventListener('click', function () {
+            navigator.clipboard && navigator.clipboard.writeText(currentPath);
+            copyBtn.textContent = 'Copied';
+            setTimeout(function () { copyBtn.textContent = 'Copy path'; }, 1200);
+        });
+
+        // ---- Drag a tile onto a folder to move it ----
+        gallery.addEventListener('dragstart', function (e) {
+            var item = e.target.closest('[data-media-item]');
+            if (!item) return;
+            e.dataTransfer.setData('text/x-media-ref', item.dataset.ref);
+            e.dataTransfer.effectAllowed = 'move';
+        });
+        gallery.querySelectorAll('.folder-tile').forEach(function (folderEl) {
+            folderEl.addEventListener('dragover', function (e) {
+                if (!e.dataTransfer.types.includes('text/x-media-ref')) return;
+                e.preventDefault();
+                folderEl.classList.add('is-dragover');
+            });
+            folderEl.addEventListener('dragleave', function () { folderEl.classList.remove('is-dragover'); });
+            folderEl.addEventListener('drop', function (e) {
+                var ref = e.dataTransfer.getData('text/x-media-ref');
+                if (!ref) return;
+                e.preventDefault();
+                e.stopPropagation();
+                folderEl.classList.remove('is-dragover');
+                var fd = new FormData();
+                fd.append('_token', gallery.dataset.token);
+                fd.append('ref', ref);
+                fd.append('to', folderEl.dataset.dropFolder);
+                fetch('{{ path('panel_media_move') }}', { method: 'POST', body: fd }).then(function () { window.location.reload(); });
+            });
+        });
+
+        // ---- Drag-and-drop upload straight onto the gallery ----
+        var zone = gallery;
+        if (zone) {
+            ['dragenter', 'dragover'].forEach(function (evt) {
+                zone.addEventListener(evt, function (e) {
+                    if (!e.dataTransfer.types.includes('Files')) return;
+                    e.preventDefault();
+                    zone.classList.add('is-dragover');
+                });
+            });
+            ['dragleave', 'drop'].forEach(function (evt) {
+                zone.addEventListener(evt, function () { zone.classList.remove('is-dragover'); });
+            });
+            zone.addEventListener('drop', function (e) {
+                var fileList = e.dataTransfer && e.dataTransfer.files;
+                if (!fileList || !fileList.length) return;
+                e.preventDefault();
+                var uploads = Array.prototype.slice.call(fileList).map(function (file) {
+                    var fd = new FormData();
+                    fd.append('_token', zone.dataset.token);
+                    fd.append('folder', zone.dataset.folder);
+                    fd.append('file', file);
+                    return fetch(zone.dataset.uploadUrl, { method: 'POST', body: fd });
+                });
+                Promise.all(uploads).then(function () { window.location.reload(); });
+            });
+        }
+    })();
     </script>
 {% endblock %}
