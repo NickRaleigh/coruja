@@ -1,0 +1,19 @@
+{% extends '@Coruja/panel/base.html.twig' %}
+{% import '@Coruja/panel/_fields.html.twig' as f %}
+{% block title %}Site settings{% endblock %}
+
+{% block body %}
+    <h1>{{ blueprint.label }}</h1>
+
+    <form class="editor" method="post" action="{{ path('panel_settings') }}">
+        <input type="hidden" name="_token" value="{{ csrf_token('panel') }}">
+
+        {% for fpath, def in blueprint.fields %}
+            {{ f.field(fpath, def, values[fpath], errors[fpath] ?? null) }}
+        {% endfor %}
+
+        <div class="actions">
+            <button type="submit" class="save">Save</button>
+        </div>
+    </form>
+{% endblock %}

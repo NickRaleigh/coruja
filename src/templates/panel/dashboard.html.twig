@@ -1,0 +1,97 @@
+{% extends '@Coruja/panel/base.html.twig' %}
+{% block title %}Pages{% endblock %}
+
+{% block body %}
+    <h1>Pages</h1>
+
+    <ul class="tree">
+        {% for node in tree %}
+            <li class="tree__row{{ node.depth ? ' tree__row--child' : '' }}{{ node.depth and node.last ? ' tree__row--last' : '' }}{{ node.folder ? ' tree__row--folder' : '' }}">
+                <div class="row">
+                    {% if node.page %}
+                        <a class="grow" href="{{ path('panel_edit', {path: node.page.path}) }}">
+                            <span>{{ node.title }}</span>
+                            <span class="path mono">{{ node.url }}</span>
+                            {% if node.page.status != 'listed' %}<span class="tag {{ node.page.status }}">{{ node.page.status }}</span>{% endif %}
+                        </a>
+                    {% else %}
+                        <span class="grow tree__folder">
+                            <span>{{ node.title }}</span>
+                            <span class="path mono">/{{ node.path }}/</span>
+                        </span>
+                    {% endif %}
+                    <span class="rowctl">
+                        {% if node.page %}
+                            <form method="post" action="{{ path('panel_move', {path: node.page.path}) }}">
+                                <input type="hidden" name="_token" value="{{ csrf_token('panel') }}">
+                                <button name="dir" value="up" title="Move up"{{ node.first ? ' disabled' : '' }}>▲</button>
+                                <button name="dir" value="down" title="Move down"{{ node.last ? ' disabled' : '' }}>▼</button>
+                            </form>
+                        {% endif %}
+                    </span>
+                </div>
+            </li>
+        {% endfor %}
+    </ul>
+
+    <h2>New page</h2>
+    <form class="newpage" method="post" action="{{ path('panel_create') }}">
+        <input type="hidden" name="_token" value="{{ csrf_token('panel') }}">
+        <div class="row2">
+            <div>
+                <label class="lbl" for="np_template">Type</label>
+                <select id="np_template" name="template">
+                    {% for t in newTemplates %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="lbl" for="np_path">URL path</label>
+                <input type="text" id="np_path" name="path" placeholder="work/new-project" required>
+            </div>
+            <div>
+                <label class="lbl" for="np_title">Title</label>
+                <input type="text" id="np_title" name="title" placeholder="New Project">
+            </div>
+        </div>
+        <button type="submit" class="save" style="margin-top:.7rem">Create draft</button>
+    </form>
+
+    <h2>Elsewhere</h2>
+    <ul class="tree">
+        <li><a class="row" href="{{ path('panel_settings') }}">Site settings <span class="path">name, email, navigation</span></a></li>
+        <li><a class="row" href="{{ path('panel_media') }}">Media library</a></li>
+        <li><a class="row" href="{{ path('admin_inbox') }}">Contact inbox</a></li>
+    </ul>
+
+    {% if sync.available %}
+        <h2>Content sync</h2>
+        <div class="sync-card">
+            {% set pending = sync.pending|length %}
+            {% if not sync.remote %}
+                <p class="sync-card__state"><span class="sync-card__dot pending"></span>No remote configured yet. Edits are saved to local history only.</p>
+            {% elseif pending or sync.ahead or sync.behind %}
+                <p class="sync-card__state">
+                    <span class="sync-card__dot pending"></span>
+                    {% set bits = [] %}
+                    {% if sync.ahead %}{% set bits = bits|merge([sync.ahead ~ ' to push']) %}{% endif %}
+                    {% if sync.behind %}{% set bits = bits|merge([sync.behind ~ ' on GitHub to pull']) %}{% endif %}
+                    {% if pending %}{% set bits = bits|merge([pending ~ ' uncommitted']) %}{% endif %}
+                    {{ bits|join(' · ') }}
+                </p>
+            {% else %}
+                <p class="sync-card__state"><span class="sync-card__dot"></span>In sync with GitHub.</p>
+            {% endif %}
+            <p class="sync-card__branch mono">branch: {{ sync.branch ?: 'unknown' }}{% if sync.behind %} · pull count is as of the last sync{% endif %}</p>
+            <div class="sync-card__actions">
+                <form method="post" action="{{ path('panel_sync_push') }}">
+                    <input type="hidden" name="_token" value="{{ csrf_token('panel') }}">
+                    <button type="submit" class="primary"{{ sync.remote ? '' : ' disabled' }}>Push to GitHub</button>
+                </form>
+                <form method="post" action="{{ path('panel_sync_pull') }}">
+                    <input type="hidden" name="_token" value="{{ csrf_token('panel') }}">
+                    <button type="submit"{{ sync.remote ? '' : ' disabled' }}>Pull from GitHub</button>
+                </form>
+            </div>
+        </div>
+    {% endif %}
+{% endblock %}

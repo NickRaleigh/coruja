@@ -1,0 +1,199 @@
+{# Blueprint-driven field rendering.
+   Types: text, textarea, richtext, select, slug, image, list, structure, group, blocks, yaml.
+   Repeatable macros take a `prefix` — the full `f[...]` name up to the repeated index. #}
+
+{% macro field(path, def, value, error) %}
+    {% import _self as f %}
+    {% set type = def.type|default('text') %}
+    {% set prefix = 'f[' ~ path ~ ']' %}
+    <div class="field">
+        <label class="lbl" for="f_{{ path }}">{{ def.label|default(path) }}</label>
+        {% if def.help is defined and def.help %}<p class="help">{{ def.help }}</p>{% endif %}
+
+        {% if type == 'textarea' or type == 'richtext' %}
+            <textarea id="f_{{ path }}" name="{{ prefix }}" rows="{{ type == 'richtext' ? 4 : 3 }}">{{- value -}}</textarea>
+
+        {% elseif type == 'yaml' %}
+            <textarea id="f_{{ path }}" class="mono" name="{{ prefix }}" rows="10" spellcheck="false" autocapitalize="off">{{- value -}}</textarea>
+
+        {% elseif type == 'select' %}
+            <select id="f_{{ path }}" name="{{ prefix }}">
+                {% for opt in def.options|default([]) %}
+                    <option value="{{ opt }}"{{ opt == value ? ' selected' : '' }}>{{ opt }}</option>
+                {% endfor %}
+            </select>
+
+        {% elseif type == 'image' %}
+            {{ f.image(prefix, value) }}
+
+        {% elseif type == 'blocks' %}
+            {{ f.blocks(path, value) }}
+
+        {% elseif type == 'list' %}
+            {{ f.listRepeater(prefix, value) }}
+
+        {% elseif type == 'structure' %}
+            {{ f.structureRepeater(prefix, def.fields|default({}), value) }}
+
+        {% elseif type == 'group' %}
+            <div class="group">
+                {% for sub, sdef in def.fields|default({}) %}
+                    {% set sdef = sdef|default({}) %}
+                    {% set stype = sdef.type|default('text') %}
+                    {% set sval = value[sub] is defined ? value[sub] : (stype in ['list', 'structure'] ? [] : '') %}
+                    {% set sprefix = prefix ~ '[' ~ sub ~ ']' %}
+                    <div class="field">
+                        <label class="lbl">{{ sdef.label|default(sub) }}</label>
+                        {% if sdef.help is defined and sdef.help %}<p class="help">{{ sdef.help }}</p>{% endif %}
+                        {% if stype == 'structure' %}
+                            {{ f.structureRepeater(sprefix, sdef.fields|default({}), sval) }}
+                        {% elseif stype == 'list' %}
+                            {{ f.listRepeater(sprefix, sval) }}
+                        {% elseif stype == 'image' %}
+                            {{ f.image(sprefix, sval) }}
+                        {% elseif stype == 'textarea' or stype == 'richtext' %}
+                            <textarea name="{{ sprefix }}" rows="3">{{- sval -}}</textarea>
+                        {% else %}
+                            <input type="text" name="{{ sprefix }}" value="{{ sval }}">
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+
+        {% else %}
+            <input type="text" id="f_{{ path }}" name="{{ prefix }}" value="{{ value }}">
+        {% endif %}
+
+        {% if error %}<p class="ferr">{{ error }}</p>{% endif %}
+    </div>
+{% endmacro %}
+
+{% macro image(prefix, value) %}
+    <div class="imgfield">
+        <img class="thumb" src="{{ value ? asset(value) : 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=' }}" alt="">
+        <input type="text" name="{{ prefix }}" value="{{ value }}" placeholder="uploads/… or imgs/…">
+        <button type="button" class="pick" data-media-pick>Browse</button>
+    </div>
+{% endmacro %}
+
+{% macro listRepeater(prefix, value) %}
+    {% import _self as f %}
+    <div data-repeat>
+        <div data-repeat-items>
+            {% for line in value %}{{ f.listLine(prefix, line) }}{% endfor %}
+        </div>
+        <template data-repeat-tpl>{{ f.listLine(prefix, '') }}</template>
+        <button type="button" class="add" data-repeat-add>+ Add</button>
+    </div>
+{% endmacro %}
+
+{% macro listLine(prefix, line) %}
+    <div class="list-line" data-repeat-row><input type="text" name="{{ prefix }}[]" value="{{ line }}"><button type="button" class="rm" title="Remove">×</button></div>
+{% endmacro %}
+
+{% macro structureRepeater(prefix, fields, value) %}
+    {% import _self as f %}
+    <div data-repeat>
+        <div data-repeat-items>
+            {% for row in value %}{{ f.structRow(prefix, fields, row, loop.index0) }}{% endfor %}
+        </div>
+        <template data-repeat-tpl>{{ f.structRow(prefix, fields, {}, '__i__') }}</template>
+        <button type="button" class="add" data-repeat-add>+ Add</button>
+    </div>
+{% endmacro %}
+
+{% macro structRow(prefix, fields, row, i) %}
+    {% import _self as f %}
+    <div class="repeat-row" data-repeat-row data-i="{{ i }}">
+        <button type="button" class="rm" title="Remove">remove</button>
+        {% for sub, sdef in fields %}
+            {% set sdef = sdef|default({}) %}
+            {% set stype = sdef.type|default('text') %}
+            {% set sval = row[sub] is defined ? row[sub] : (stype == 'list' ? [] : '') %}
+            {% set n = prefix ~ '[' ~ i ~ '][' ~ sub ~ ']' %}
+            <div class="field">
+                <label class="lbl">{{ sdef.label|default(sub) }}</label>
+                {% if sdef.help is defined and sdef.help %}<p class="help">{{ sdef.help }}</p>{% endif %}
+                {% if stype == 'image' %}
+                    {{ f.image(n, sval) }}
+                {% elseif stype == 'list' %}
+                    {{ f.listRepeater(n, sval) }}
+                {% elseif stype == 'select' %}
+                    <select name="{{ n }}">
+                        {% for opt in sdef.options|default([]) %}
+                            <option value="{{ opt }}"{{ opt == sval ? ' selected' : '' }}>{{ opt }}</option>
+                        {% endfor %}
+                    </select>
+                {% elseif stype == 'textarea' or stype == 'richtext' %}
+                    <textarea name="{{ n }}" rows="3">{{- sval -}}</textarea>
+                {% else %}
+                    <input type="text" name="{{ n }}" value="{{ sval }}">
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+{% endmacro %}
+
+{# ---- blocks: sections [{label, body[]}], body blocks {type: p|h3|note, text} or {type: list, items[]} ---- #}
+
+{% macro blocks(path, sections) %}
+    {% import _self as f %}
+    <div class="blocks" data-repeat data-token="__s__">
+        <div data-repeat-items>
+            {% for sec in sections %}{{ f.section(path, sec, loop.index0) }}{% endfor %}
+        </div>
+        <template data-repeat-tpl>{{ f.section(path, {}, '__s__') }}</template>
+        <button type="button" class="add" data-repeat-add>+ Add section</button>
+    </div>
+{% endmacro %}
+
+{% macro section(path, sec, s) %}
+    {% import _self as f %}
+    {% set base = 'f[' ~ path ~ '][' ~ s ~ ']' %}
+    <div class="repeat-row" data-repeat-row>
+        <button type="button" class="rm" title="Remove section">remove</button>
+        <div class="field">
+            <label class="lbl">Section label</label>
+            <input type="text" name="{{ base }}[label]" value="{{ sec.label|default('') }}">
+        </div>
+        <div data-repeat data-token="__b__">
+            <div data-repeat-items>
+                {% for blk in sec.body|default([]) %}{{ f.bodyBlock(base, blk, loop.index0) }}{% endfor %}
+            </div>
+            <template data-repeat-tpl>{{ f.bodyBlock(base, {'type': 'p'}, '__b__') }}</template>
+            <button type="button" class="add" data-repeat-add>+ Add block</button>
+        </div>
+    </div>
+{% endmacro %}
+
+{% macro bodyBlock(base, blk, b) %}
+    {% set n = base ~ '[body][' ~ b ~ ']' %}
+    {% set t = blk.type|default('p') %}
+    <div class="repeat-row body-block" data-repeat-row data-type="{{ t }}">
+        <button type="button" class="rm" title="Remove block">remove</button>
+        <div class="field">
+            <label class="lbl">Type</label>
+            <select class="block-type" name="{{ n }}[type]">
+                {% for opt in ['p', 'h3', 'note', 'list'] %}
+                    <option value="{{ opt }}"{{ opt == t ? ' selected' : '' }}>{{ opt }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="field blk-text">
+            <label class="lbl">Text</label>
+            <textarea name="{{ n }}[text]" rows="3">{{- blk.text|default('') -}}</textarea>
+        </div>
+        <div class="field blk-items">
+            <label class="lbl">List items</label>
+            <div data-repeat>
+                <div data-repeat-items>
+                    {% for item in blk.items|default([]) %}
+                        <div class="list-line" data-repeat-row><input type="text" name="{{ n }}[items][]" value="{{ item }}"><button type="button" class="rm">×</button></div>
+                    {% endfor %}
+                </div>
+                <template data-repeat-tpl><div class="list-line" data-repeat-row><input type="text" name="{{ n }}[items][]" value=""><button type="button" class="rm">×</button></div></template>
+                <button type="button" class="add" data-repeat-add>+ Add item</button>
+            </div>
+        </div>
+    </div>
+{% endmacro %}

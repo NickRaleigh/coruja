@@ -1,0 +1,26 @@
+{# Live SEO + readability analysis. Populated by the script in base.html.twig,
+   which POSTs the unsaved form to panel_analyze on every edit. #}
+<section class="seo-panel" data-seo-panel data-analyze-url="{{ path('panel_analyze', {path: page.path}) }}">
+    <div class="seo-panel__head">
+        <h2>Search appearance</h2>
+        <div class="seo-scores">
+            <span class="seo-dial" data-seo-dial="seo"><b data-seo-score="seo">–</b> SEO</span>
+            <span class="seo-dial" data-seo-dial="readability"><b data-seo-score="readability">–</b> Readability</span>
+        </div>
+    </div>
+
+    <div class="serp">
+        <div class="serp__url" data-serp-url>{{ site_url }}{{ page.url }}</div>
+        <div class="serp__title" data-serp-title>{{ page.title }}</div>
+        <div class="serp__desc" data-serp-desc>…</div>
+        <div class="serp__meta" data-serp-meta></div>
+    </div>
+
+    <div class="seo-checks">
+        <h3>SEO <span data-seo-count="seo"></span></h3>
+        <ul data-seo-list="seo"><li class="seo-check">Analyzing…</li></ul>
+        <h3>Readability <span data-seo-count="readability"></span></h3>
+        <ul data-seo-list="readability"></ul>
+        <p class="seo-stats" data-seo-stats></p>
+    </div>
+</section>

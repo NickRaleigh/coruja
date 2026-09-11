@@ -1,0 +1,46 @@
+{% extends '@Coruja/panel/base.html.twig' %}
+{% block title %}Media{% endblock %}
+
+{% block body %}
+    <h1>Media library</h1>
+
+    <form class="editor" method="post" action="{{ path('panel_media_upload') }}" enctype="multipart/form-data">
+        <input type="hidden" name="_token" value="{{ csrf_token('panel') }}">
+        <div class="field">
+            <label class="lbl" for="mfile">Upload an image</label>
+            <p class="help">JPEG, PNG, GIF, WebP, AVIF or SVG. Up to 8 MB.</p>
+            <input type="file" id="mfile" name="file" accept="image/*" required>
+        </div>
+        <button type="submit" class="save">Upload</button>
+    </form>
+
+    <h2>{{ files|length }} file{{ files|length == 1 ? '' : 's' }}</h2>
+    <div class="media-grid">
+        {% for f in files %}
+            <figure class="media-item">
+                <img src="{{ asset(f.path) }}" alt="{{ f.name }}" loading="lazy">
+                <figcaption class="mono">{{ f.path }}</figcaption>
+                <div class="media-actions">
+                    <button type="button" class="copy" data-copy="{{ f.path }}">Copy path</button>
+                    <form method="post" action="{{ path('panel_media_delete') }}" onsubmit="return confirm('Delete {{ f.name }}?')">
+                        <input type="hidden" name="_token" value="{{ csrf_token('panel') }}">
+                        <input type="hidden" name="name" value="{{ f.name }}">
+                        <button type="submit" class="danger">Delete</button>
+                    </form>
+                </div>
+            </figure>
+        {% else %}
+            <p class="help">Nothing uploaded yet.</p>
+        {% endfor %}
+    </div>
+
+    <script>
+        document.addEventListener('click', function (e) {
+            var b = e.target.closest('.copy');
+            if (!b) return;
+            navigator.clipboard && navigator.clipboard.writeText(b.dataset.copy);
+            b.textContent = 'Copied';
+            setTimeout(function () { b.textContent = 'Copy path'; }, 1200);
+        });
+    </script>
+{% endblock %}

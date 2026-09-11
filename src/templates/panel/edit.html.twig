@@ -1,0 +1,56 @@
+{% extends '@Coruja/panel/base.html.twig' %}
+{% import '@Coruja/panel/_fields.html.twig' as f %}
+{% block title %}{{ page.title }}{% endblock %}
+
+{% block body %}
+    <h1>{{ blueprint.label }} — <span class="mono" style="font-size:.8em;color:var(--dim)">{{ page.url }}</span></h1>
+
+    <form class="editor" method="post" action="{{ path('panel_edit', {path: page.path}) }}">
+        <input type="hidden" name="_token" value="{{ csrf_token('panel') }}">
+
+        <fieldset class="settings">
+            <legend>Page settings</legend>
+            <div class="field" style="margin-bottom:1rem">
+                <label class="lbl" for="meta_nickname">Nickname</label>
+                <p class="help">Short name for the pages list in this panel. The public title is unaffected.</p>
+                <input type="text" id="meta_nickname" name="meta[nickname]" value="{{ meta.nickname }}"
+                       placeholder="{{ page.label }}">
+            </div>
+            <div class="row2">
+                <div>
+                    <label class="lbl" for="meta_status">Status</label>
+                    <select id="meta_status" name="meta[status]">
+                        {% for s in statuses %}
+                            <option value="{{ s }}"{{ s == meta.status ? ' selected' : '' }}>{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="lbl" for="meta_sort">Sort</label>
+                    <input type="text" inputmode="numeric" id="meta_sort" name="meta[sort]" value="{{ meta.sort }}">
+                </div>
+            </div>
+        </fieldset>
+
+        {% include '@Coruja/panel/_seo.html.twig' %}
+
+        {% for fpath, def in blueprint.fields %}
+            {{ f.field(fpath, def, values[fpath], errors[fpath] ?? null) }}
+        {% endfor %}
+
+        <div class="actions">
+            <button type="submit" class="save">Save</button>
+            <a class="view" href="{{ page.url }}" target="_blank" rel="noopener">
+                {{ page.status == 'draft' ? 'Preview draft ↗' : 'View page ↗' }}
+            </a>
+        </div>
+    </form>
+
+    {% if not page.isHome %}
+        <form method="post" action="{{ path('panel_delete', {path: page.path}) }}"
+              onsubmit="return confirm('Delete “{{ page.title }}” for good?')" style="margin-top:2rem">
+            <input type="hidden" name="_token" value="{{ csrf_token('panel') }}">
+            <button type="submit" class="danger">Delete this page</button>
+        </form>
+    {% endif %}
+{% endblock %}
