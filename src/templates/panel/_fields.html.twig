@@ -88,7 +88,7 @@
 {% endmacro %}
 
 {% macro listLine(prefix, line) %}
-    <div class="list-line" data-repeat-row><input type="text" name="{{ prefix }}[]" value="{{ line }}"><button type="button" class="rm" title="Remove">×</button></div>
+    <div class="list-line" data-repeat-row><span class="drag" draggable="true" title="Drag to reorder">⋮⋮</span><input type="text" name="{{ prefix }}[]" value="{{ line }}"><button type="button" class="rm" title="Remove">×</button></div>
 {% endmacro %}
 
 {% macro structureRepeater(prefix, fields, value) %}
@@ -105,16 +105,19 @@
 {% macro structRow(prefix, fields, row, i) %}
     {% import _self as f %}
     <div class="repeat-row" data-repeat-row data-i="{{ i }}">
+        <span class="drag" draggable="true" title="Drag to reorder">⋮⋮</span>
         <button type="button" class="rm" title="Remove">remove</button>
         {% for sub, sdef in fields %}
             {% set sdef = sdef|default({}) %}
             {% set stype = sdef.type|default('text') %}
-            {% set sval = row[sub] is defined ? row[sub] : (stype == 'list' ? [] : '') %}
+            {% set sval = row[sub] is defined ? row[sub] : (stype in ['list', 'structure'] ? [] : '') %}
             {% set n = prefix ~ '[' ~ i ~ '][' ~ sub ~ ']' %}
             <div class="field">
                 <label class="lbl">{{ sdef.label|default(sub) }}</label>
                 {% if sdef.help is defined and sdef.help %}<p class="help">{{ sdef.help }}</p>{% endif %}
-                {% if stype == 'image' %}
+                {% if stype == 'structure' %}
+                    {{ f.structureRepeater(n, sdef.fields|default({}), sval) }}
+                {% elseif stype == 'image' %}
                     {{ f.image(n, sval) }}
                 {% elseif stype == 'list' %}
                     {{ f.listRepeater(n, sval) }}
@@ -151,6 +154,7 @@
     {% import _self as f %}
     {% set base = 'f[' ~ path ~ '][' ~ s ~ ']' %}
     <div class="repeat-row" data-repeat-row>
+        <span class="drag" draggable="true" title="Drag to reorder">⋮⋮</span>
         <button type="button" class="rm" title="Remove section">remove</button>
         <div class="field">
             <label class="lbl">Section label</label>
@@ -167,9 +171,11 @@
 {% endmacro %}
 
 {% macro bodyBlock(base, blk, b) %}
+    {% import _self as f %}
     {% set n = base ~ '[body][' ~ b ~ ']' %}
     {% set t = blk.type|default('p') %}
     <div class="repeat-row body-block" data-repeat-row data-type="{{ t }}">
+        <span class="drag" draggable="true" title="Drag to reorder">⋮⋮</span>
         <button type="button" class="rm" title="Remove block">remove</button>
         <div class="field">
             <label class="lbl">Type</label>
@@ -185,15 +191,7 @@
         </div>
         <div class="field blk-items">
             <label class="lbl">List items</label>
-            <div data-repeat>
-                <div data-repeat-items>
-                    {% for item in blk.items|default([]) %}
-                        <div class="list-line" data-repeat-row><input type="text" name="{{ n }}[items][]" value="{{ item }}"><button type="button" class="rm">×</button></div>
-                    {% endfor %}
-                </div>
-                <template data-repeat-tpl><div class="list-line" data-repeat-row><input type="text" name="{{ n }}[items][]" value=""><button type="button" class="rm">×</button></div></template>
-                <button type="button" class="add" data-repeat-add>+ Add item</button>
-            </div>
+            {{ f.listRepeater(n ~ '[items]', blk.items|default([])) }}
         </div>
     </div>
 {% endmacro %}

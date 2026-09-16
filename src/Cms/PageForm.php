@@ -151,9 +151,11 @@ final class PageForm
             foreach ($fields as $sub => $subDef) {
                 $subDef = \is_array($subDef) ? $subDef : [];
                 $type = $subDef['type'] ?? 'text';
-                $clean[$sub] = 'list' === $type
-                    ? $this->cleanList((array) ($row[$sub] ?? []))
-                    : trim((string) ($row[$sub] ?? ''));
+                $clean[$sub] = match ($type) {
+                    'structure' => $this->cleanStructure((array) ($row[$sub] ?? []), $subDef['fields'] ?? []),
+                    'list' => $this->cleanList((array) ($row[$sub] ?? [])),
+                    default => trim((string) ($row[$sub] ?? '')),
+                };
                 if ('select' !== $type) {
                     $substantive[$sub] = $clean[$sub];
                 }

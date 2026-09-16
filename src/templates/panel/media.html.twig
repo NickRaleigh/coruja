@@ -61,7 +61,7 @@
                         <video src="{{ asset(f.path) }}" muted preload="metadata"></video>
                         <span class="media-tile__badge">▶ video</span>
                     {% else %}
-                        <img src="{{ asset(f.path) }}" alt="{{ f.name }}" loading="lazy">
+                        <img src="{{ path('panel_media_thumb', {ref: f.ref}) }}" alt="{{ f.name }}" loading="lazy">
                     {% endif %}
                     <span class="media-tile__name">{{ f.name }}</span>
                 </button>

@@ -127,25 +127,34 @@ final class MediaLibrary
     }
 
     /**
-     * Every image anywhere in the library, regardless of folder — for the
-     * content-field image picker, which just wants "any image, pick one".
-     * Video is deliberately excluded: that picker only ever fills an <img>.
+     * Every file under $folder ('' = the whole library), including
+     * subfolders at any depth. Used by the content-field image picker
+     * ($folder omitted, $type left at its 'image' default — "any image,
+     * pick one") and by pages that want everything nested under one folder,
+     * e.g. a portfolio category that should also pick up shots an editor
+     * dropped into a "Behind the Scenes" subfolder. Pass $type = null to
+     * include video too.
      *
      * @return list<array{name: string, path: string, ref: string, type: string, size: int, modified: int}>
      */
-    public function allRecursive(): array
+    public function allRecursive(string $folder = '', ?string $type = 'image'): array
     {
-        if (!is_dir($this->dir)) {
+        $base = $this->resolve($folder);
+        if (null === $base || !is_dir($base)) {
             return [];
         }
 
         $out = [];
         $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($this->dir, \FilesystemIterator::SKIP_DOTS),
+            new \RecursiveDirectoryIterator($base, \FilesystemIterator::SKIP_DOTS),
         );
         foreach ($iterator as $entry) {
             /** @var \SplFileInfo $entry */
-            if (!$entry->isFile() || 'image' !== self::typeFor($entry->getExtension())) {
+            if (!$entry->isFile()) {
+                continue;
+            }
+            $fileType = self::typeFor($entry->getExtension());
+            if (null === $fileType || (null !== $type && $type !== $fileType)) {
                 continue;
             }
             $ref = str_replace(\DIRECTORY_SEPARATOR, '/', substr($entry->getPathname(), \strlen($this->dir) + 1));
@@ -153,7 +162,7 @@ final class MediaLibrary
                 'name' => $entry->getFilename(),
                 'path' => 'uploads/'.$ref,
                 'ref' => $ref,
-                'type' => 'image',
+                'type' => $fileType,
                 'size' => (int) $entry->getSize(),
                 'modified' => (int) $entry->getMTime(),
             ];

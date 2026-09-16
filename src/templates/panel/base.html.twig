@@ -67,8 +67,19 @@
             position: absolute; top: .5rem; right: .5rem; border: 1px solid var(--line);
             background: #fff; border-radius: 5px; cursor: pointer; font-size: .78rem; padding: .1rem .45rem; color: var(--dim);
         }
-        .list-line { display: flex; gap: .5rem; margin-bottom: .4rem; }
+        .repeat-row .drag {
+            position: absolute; top: .5rem; left: .5rem; font-size: .78rem; line-height: 1;
+            letter-spacing: -.15em; color: var(--dim); cursor: grab; padding: .15rem .3rem; border-radius: 5px;
+        }
+        .repeat-row .drag:hover { background: #f0ede4; }
+        .repeat-row.dragging { opacity: .4; }
+        .list-line { display: flex; gap: .5rem; margin-bottom: .4rem; align-items: center; }
         .list-line .rm { flex: 0 0 auto; }
+        .list-line .drag {
+            flex: 0 0 auto; font-size: .78rem; line-height: 1; letter-spacing: -.15em;
+            color: var(--dim); cursor: grab; padding: 0 .2rem;
+        }
+        .list-line.dragging { opacity: .4; }
         button.add {
             border: 1px dashed var(--line); background: transparent; border-radius: 6px;
             padding: .4rem .8rem; cursor: pointer; color: var(--dim); font: inherit;
@@ -388,6 +399,40 @@
             var row = rm.closest('[data-repeat-row]');
             if (row) row.remove();
         }
+    });
+
+    // Drag-to-reorder: grab a row by its [.drag] handle and drop it among its
+    // own siblings. Reordering the DOM is all that's needed — a <form>
+    // serializes fields in document order regardless of the (often
+    // non-sequential) index baked into each field's name, and the backend
+    // (PageForm's cleanStructure/cleanSections/cleanList) rebuilds arrays by
+    // iterating the submitted rows in that order. Comparing parentElement
+    // keeps a drag scoped to its own [data-repeat-items] container even when
+    // repeaters are nested (e.g. blocks -> sections -> body blocks).
+    var dragRow = null;
+    document.addEventListener('dragstart', function (e) {
+        var handle = e.target.closest('.drag');
+        dragRow = handle ? handle.closest('[data-repeat-row]') : null;
+        if (!dragRow) return;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', '');
+        requestAnimationFrame(function () { dragRow.classList.add('dragging'); });
+    });
+    document.addEventListener('dragover', function (e) {
+        if (!dragRow) return;
+        var overRow = e.target.closest('[data-repeat-row]');
+        if (!overRow || overRow === dragRow || overRow.parentElement !== dragRow.parentElement) return;
+        e.preventDefault();
+        var rect = overRow.getBoundingClientRect();
+        var before = e.clientY < rect.top + rect.height / 2;
+        overRow.parentElement.insertBefore(dragRow, before ? overRow : overRow.nextSibling);
+    });
+    document.addEventListener('drop', function (e) {
+        if (dragRow) e.preventDefault();
+    });
+    document.addEventListener('dragend', function () {
+        if (dragRow) dragRow.classList.remove('dragging');
+        dragRow = null;
     });
 
     // Body-block type -> show text vs items.

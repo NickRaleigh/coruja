@@ -10,8 +10,10 @@ use Coruja\Cms\MediaLibrary;
 use Coruja\Cms\Page;
 use Coruja\Cms\PageForm;
 use Coruja\Cms\Site;
+use Coruja\Cms\Thumbnailer;
 use Coruja\Seo\SeoAnalyzer;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -34,6 +36,7 @@ class PanelController extends AbstractController
         private readonly MediaLibrary $media,
         private readonly SeoAnalyzer $seo,
         private readonly GitSync $git,
+        private readonly Thumbnailer $thumbnailer,
     ) {
     }
 
@@ -287,6 +290,47 @@ class PanelController extends AbstractController
             'files' => $this->media->all($folder, $type),
             'allFolders' => $this->media->allFolders(),
         ]);
+    }
+
+    /**
+     * A single image's thumbnail, generating it on first request (cached to
+     * disk thereafter). This is its own route rather than something computed
+     * eagerly for a whole folder listing, precisely so that: (a) generating
+     * hundreds of thumbnails can never blow one request's execution-time
+     * limit, and (b) combined with the grid's loading="lazy", a thumbnail is
+     * only ever generated for an image someone actually scrolls to.
+     */
+    #[Route('/media/thumb', name: 'panel_media_thumb', methods: ['GET'])]
+    public function mediaThumb(Request $request): Response
+    {
+        $ref = trim((string) $request->query->get('ref', ''), '/');
+        if ('' === $ref || str_contains($ref, '..')) {
+            throw $this->createNotFoundException();
+        }
+
+        $relative = $this->thumbnailer->thumb($ref);
+        $absolute = $this->getParameter('kernel.project_dir').'/public/'.$relative;
+        if (!is_file($absolute)) {
+            throw $this->createNotFoundException();
+        }
+
+        // Set the content type explicitly rather than via BinaryFileResponse's
+        // default guessing, which needs fileinfo/symfony-mime and isn't
+        // guaranteed to be available.
+        $contentType = match (strtolower(pathinfo($absolute, \PATHINFO_EXTENSION))) {
+            'png' => 'image/png',
+            'webp' => 'image/webp',
+            'gif' => 'image/gif',
+            'svg' => 'image/svg+xml',
+            default => 'image/jpeg',
+        };
+
+        $response = new BinaryFileResponse($absolute);
+        $response->headers->set('Content-Type', $contentType);
+        $response->setPublic();
+        $response->setMaxAge(2592000);
+
+        return $response;
     }
 
     #[Route('/media', name: 'panel_media_upload', methods: ['POST'])]
