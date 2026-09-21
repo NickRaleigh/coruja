@@ -52,9 +52,11 @@ class SitemapController extends AbstractController
             ];
         }
 
-        // Content pages from the flat-file tree.
+        // Content pages from the flat-file tree. Everything indexable goes in,
+        // including 'unlisted' pages (hidden from nav/listing but still meant
+        // to be found and ranked) — only 'draft' pages are excluded.
         foreach ($content->all() as $page) {
-            if ('listed' !== $page->status()) {
+            if ('draft' === $page->status()) {
                 continue;
             }
             $path = $page->url();
@@ -112,7 +114,7 @@ class SitemapController extends AbstractController
         $lines[] = '## Pages';
         $lines[] = '';
         foreach ($content->all() as $page) {
-            if ('listed' !== $page->status()) {
+            if ('draft' === $page->status()) {
                 continue;
             }
             $label = trim(explode('·', $page->title())[0]);
