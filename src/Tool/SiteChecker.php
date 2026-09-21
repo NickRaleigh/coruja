@@ -30,8 +30,8 @@ final class SiteChecker
         $this->http = $http ?? new NoPrivateNetworkHttpClient(HttpClient::create([
             'headers' => ['User-Agent' => 'NickRaleighSEOCheck/1.0 (+https://nickraleigh.com/seo-check)'],
             'max_redirects' => 4,
-            'timeout' => 8,
-            'max_duration' => 15,
+            'timeout' => 6,
+            'max_duration' => 10,
         ]));
     }
 
@@ -58,7 +58,11 @@ final class SiteChecker
                 return ['ok' => false, 'error' => 'That URL does not return a web page.'];
             }
 
-            $html = substr($response->getContent(false), 0, 3_000_000);
+            // Capped well below what a real page needs for these checks (everything
+            // scored here lives in <head> or near the top of <body>) so a bloated
+            // real-world page can't drag DOMDocument parsing into multi-second,
+            // high-memory territory.
+            $html = substr($response->getContent(false), 0, 800_000);
             $info = $response->getInfo();
             $finalUrl = (string) ($info['url'] ?? $url);
             $ttfb = (float) ($info['starttransfer_time'] ?? $info['total_time'] ?? 0);
@@ -67,8 +71,12 @@ final class SiteChecker
             return ['ok' => false, 'error' => $this->friendlyError($e->getMessage())];
         }
 
-        $dom = $this->parse($html);
-        $checks = $this->runChecks($dom, $finalUrl, $ttfb, $headers, $status);
+        try {
+            $dom = $this->parse($html);
+            $checks = $this->runChecks($dom, $finalUrl, $ttfb, $headers, $status);
+        } catch (\Throwable) {
+            return ['ok' => false, 'error' => 'That page could not be analyzed. It may be too large or unusually structured.'];
+        }
         $score = \count(array_filter($checks, static fn ($c) => self::PASS === $c['status']));
 
         return [
@@ -202,7 +210,7 @@ final class SiteChecker
         $origin = ($parts['scheme'] ?? 'https').'://'.$parts['host'];
 
         try {
-            $sm = $this->http->request('GET', $origin.'/sitemap.xml', ['timeout' => 5]);
+            $sm = $this->http->request('GET', $origin.'/sitemap.xml', ['timeout' => 4]);
             if (200 === $sm->getStatusCode() && str_contains(strtolower($sm->getContent(false)), '<urlset')) {
                 return true;
             }
@@ -210,7 +218,7 @@ final class SiteChecker
         }
 
         try {
-            $robots = $this->http->request('GET', $origin.'/robots.txt', ['timeout' => 5]);
+            $robots = $this->http->request('GET', $origin.'/robots.txt', ['timeout' => 4]);
             if (200 === $robots->getStatusCode() && preg_match('/^\s*sitemap:\s*\S+/im', $robots->getContent(false))) {
                 return true;
             }
